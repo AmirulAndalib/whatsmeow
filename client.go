@@ -181,7 +181,7 @@ type Client struct {
 	// separate library for all the non-e2ee-related stuff like logging in.
 	// The library is currently embedded in mautrix-meta (https://github.com/mautrix/meta), but may be separated later.
 	MessengerConfig *MessengerConfig
-	RefreshCAT      func() error
+	RefreshCAT      func(context.Context) error
 }
 
 type groupMetaCache struct {
@@ -445,7 +445,7 @@ func (cli *Client) Connect() error {
 
 	err := cli.unlockedConnect()
 	if exhttp.IsNetworkError(err) && cli.InitialAutoReconnect && cli.EnableAutoReconnect {
-		cli.Log.Errorf("Initial connection failed but reconnecting in background")
+		cli.Log.Errorf("Initial connection failed but reconnecting in background (%v)", err)
 		go cli.dispatchEvent(&events.Disconnected{})
 		go cli.autoReconnect()
 		return nil

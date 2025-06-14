@@ -52,10 +52,10 @@ func (cli *Client) handleEncryptedMessage(node *waBinary.Node) {
 		if info.VerifiedName != nil && len(info.VerifiedName.Details.GetVerifiedName()) > 0 {
 			go cli.updateBusinessName(context.WithoutCancel(ctx), info.Sender, info, info.VerifiedName.Details.GetVerifiedName())
 		}
-		if len(info.PushName) > 0 && info.PushName != "-" {
+		if len(info.PushName) > 0 && info.PushName != "-" && (cli.MessengerConfig == nil || info.PushName != "username") {
 			go cli.updatePushName(context.WithoutCancel(ctx), info.Sender, info, info.PushName)
 		}
-		defer cli.maybeDeferredAck(node)()
+		defer cli.maybeDeferredAck(ctx, node)()
 		if info.Sender.Server == types.NewsletterServer {
 			cli.handlePlaintextMessage(ctx, info, node)
 		} else {
@@ -264,7 +264,11 @@ func (cli *Client) decryptMessages(ctx context.Context, info *types.MessageInfo,
 	if ok && len(node.GetChildrenByTag("enc")) == 0 {
 		uType := events.UnavailableType(unavailableNode.AttrGetter().String("type"))
 		cli.Log.Warnf("Unavailable message %s from %s (type: %q)", info.ID, info.SourceString(), uType)
-		go cli.delayedRequestMessageFromPhone(info)
+		if cli.SynchronousAck {
+			cli.immediateRequestMessageFromPhone(ctx, info)
+		} else {
+			go cli.delayedRequestMessageFromPhone(info)
+		}
 		cli.dispatchEvent(&events.UndecryptableMessage{Info: *info, IsUnavailable: true, UnavailableType: uType})
 		return
 	}
@@ -342,10 +346,17 @@ func (cli *Client) decryptMessages(ctx context.Context, info *types.MessageInfo,
 			cli.Log.Debugf("Ignoring message %s from %s: %v", info.ID, info.SourceString(), err)
 			return
 		} else if err != nil {
-			cli.Log.Warnf("Error decrypting message from %s: %v", info.SourceString(), err)
+			cli.Log.Warnf("Error decrypting message %s from %s: %v", info.ID, info.SourceString(), err)
+			if ctx.Err() != nil {
+				return
+			}
 			isUnavailable := encType == "skmsg" && !containsDirectMsg && errors.Is(err, signalerror.ErrNoSenderKeyForUser)
 			if encType != "msmsg" {
-				go cli.sendRetryReceipt(context.WithoutCancel(ctx), node, info, isUnavailable)
+				if cli.SynchronousAck {
+					cli.sendRetryReceipt(ctx, node, info, isUnavailable)
+				} else {
+					go cli.sendRetryReceipt(context.WithoutCancel(ctx), node, info, isUnavailable)
+				}
 			}
 			cli.dispatchEvent(&events.UndecryptableMessage{
 				Info:            *info,
